@@ -672,14 +672,16 @@ function printSheet() {
     .ps-victim{background:#fcd4d8}.ps-gen{background:#d6f0ea;font-style:italic;font-weight:700}
     .ps-name{font-weight:900;margin-bottom:3px}
     .ps-clue{font-style:italic;font-weight:700}
-    @media print{.noprint{display:none}}
+    @media print{.noprint{display:none}.page-break{break-before:page;page-break-before:always}}
   </style></head><body>
   <h1>${escapeHtml(S.title)}</h1>
   ${printGridHTML()}
   ${regionLegend}
   ${objLegend}
+  <div class="page-break">
   ${genHtml}
   ${(suspects().length || v) ? '<h2>Clue cards</h2>' + clueCols : ''}
+  </div>
   <p class="noprint"><button onclick="window.print()" style="font-family:Nunito;font-weight:800;padding:8px 16px;border:2px solid #232229;border-radius:8px;background:#efc85a;cursor:pointer;box-shadow:3px 3px 0 rgba(35,34,41,.25)">🖨 Print</button></p>
   </body></html>`);
   w.document.close();
