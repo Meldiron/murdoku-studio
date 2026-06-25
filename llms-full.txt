@@ -1,0 +1,225 @@
+# Murdoku — full reference for generating puzzle cases as JSON
+
+This document gives a language model everything it needs to generate a valid
+Murdoku case from a natural-language prompt. It explains (1) what Murdoku is and
+its rules, (2) the exact JSON schema the Murdoku Studio app imports, (3) the
+constraints a valid case must satisfy, and (4) guidance for writing good clues.
+A complete worked example is at the end.
+
+================================================================================
+1. WHAT IS MURDOKU
+================================================================================
+
+Murdoku is a logic puzzle: "a murder mystery that plays like Sudoku." The solver
+places a cast of named people onto a grid using clue cards, then identifies the
+murderer.
+
+Core rules:
+
+- THE GRID. An R×C grid is the crime scene (commonly 6×6; 3–9 each side). Cells
+  are addressed by (row, column). Row 1 is the TOP row; column 1 is the LEFT
+  column.
+
+- PEOPLE. There are several suspects plus exactly ONE victim. Every person —
+  suspects AND the victim — occupies one cell.
+
+- ROW/COLUMN CONSTRAINT (the "Sudoku" rule). At most one person per row and at
+  most one person per column. So the set of people forms a partial permutation:
+  no two people share a row, and no two share a column. In a "full" case the
+  number of people equals the grid side (e.g. 6 people on a 6×6 grid), so every
+  row and every column holds exactly one person.
+
+- REGIONS. The grid is divided into named, colored areas called regions (e.g.
+  "Living Room", "Kitchen", "Bedroom"). Every relevant cell belongs to a region.
+  Regions group cells and are referenced by clues.
+
+- OBJECTS. Objects (shelf, bed, chair, TV, table, …) sit on cells and are
+  referenced by clues. An object is either "occupiable" (a person can stand on
+  its cell — bed, chair, sofa, table) or scenery that cannot be occupied (shelf,
+  TV, plant, …). A person may share a cell with an occupiable object.
+
+- THE MURDER CONDITION. The murderer is the suspect who is ALONE WITH THE VICTIM:
+  the victim's region contains exactly ONE suspect, and that suspect is the
+  murderer. (The victim's own card always reads "…was alone with the murderer.")
+  Therefore a valid case MUST place the victim inside a region that contains
+  exactly one suspect.
+
+- CLUES. Each suspect carries one free-text clue card describing where they were.
+  The victim's clue is generated automatically and must not be supplied. There
+  may also be "general clues" — scene-wide facts not tied to one suspect. Clues
+  are prose; the solver reads them to deduce placements.
+
+================================================================================
+2. THE JSON SCHEMA (authoring format)
+================================================================================
+
+Produce a single JSON object with this shape. This is the "authoring format"
+that the Studio's Import accepts directly.
+
+{
+  "title": string,                      // case name, e.g. "Netflix and Kill"
+  "grid": { "rows": int, "cols": int }, // 3..9 each
+
+  "regions": [
+    {
+      "name": string,                   // e.g. "Living Room"
+      "color": string,                  // hex color, e.g. "#d6f0ea" (optional; auto if omitted)
+      "cells": [[row, col], ...]        // 1-based [row, col] pairs that belong to this region
+    }
+  ],
+
+  "objects": [
+    {
+      "type": string,                   // lowercase noun, e.g. "shelf", "bed", "chair"
+      "emoji": string,                  // single emoji shown on the cell, e.g. "📚" (optional; default 🏠)
+      "occupiable": boolean,            // true = a person may stand here; false = scenery (optional; default true)
+      "row": int, "col": int            // 1-based cell the object sits on
+    }
+  ],
+
+  "people": [
+    {
+      "name": string,                   // e.g. "Austin"
+      "color": string,                  // hex token color (optional; auto if omitted)
+      "row": int, "col": int,           // 1-based cell the person occupies
+      "victim": boolean,                // true for the single victim; omit/false for suspects
+      "clue": string                    // the suspect's clue card (omit for the victim)
+    }
+  ],
+
+  "generalClues": [ string, ... ]       // optional scene-wide clues
+}
+
+NOTES ON COORDINATES
+- ALL coordinates in this format are 1-BASED: row 1 = top, col 1 = left.
+- A region's "cells" are [row, col] pairs. List every cell that belongs to it.
+- Regions should not overlap; ideally every cell belongs to exactly one region.
+
+NOTES ON DIRECTIONS (use consistently in clue prose)
+- "north" = up = a smaller row number;  "south" = down = a larger row number.
+- "west"  = left = a smaller column;     "east"  = right = a larger column.
+- "beside" / "next to" = orthogonally adjacent (up/down/left/right) AND in the
+  same region. (Diagonal is NOT beside.)
+- "the last column" = column = cols; "the top row" = row 1; "the bottom row" =
+  row = rows.
+
+================================================================================
+3. VALIDITY CONSTRAINTS (a generated case MUST satisfy all of these)
+================================================================================
+
+1. grid.rows and grid.cols are between 3 and 9.
+2. There is exactly ONE person with "victim": true.
+3. There are one or more suspects (people without "victim": true).
+4. Every person has a row and col within the grid.
+5. ROW/COLUMN RULE: no two people share a row; no two people share a column
+   (the victim counts). Tip: choose people positions as a permutation.
+6. The victim's cell lies inside some region, and EXACTLY ONE suspect lies in
+   that same region. That suspect is the murderer. (No suspect in the victim's
+   region = unsolvable; two or more = ambiguous. Both are invalid.)
+7. Every suspect has a non-empty "clue". The victim has NO clue (auto-generated).
+8. Objects referenced by clues should actually be placed on the board, and clue
+   prose should be TRUE for the stated placement (e.g. if a clue says "beside the
+   shelf", that person's cell must be orthogonally adjacent to a shelf cell in
+   the same region).
+9. The full clue set should ideally determine a unique arrangement, but the app
+   does not verify uniqueness for free-text clues — that is the author's craft.
+   Aim for clues that, taken together, pin every suspect to one cell.
+
+================================================================================
+4. WRITING GOOD CLUES
+================================================================================
+
+Each suspect gets ONE clue, written in natural past tense with a pronoun or the
+phrasing of your choice. Mix these clue flavors so the puzzle is solvable by
+elimination:
+
+- On an object:        "She was on the bed."        (person's cell holds that object)
+- Beside an object:    "He was beside a shelf."      (adjacent + same region)
+- Only one at object:  "She was the only person sitting in a chair."
+- In a region:         "He was in the Kitchen."
+- Column / row:        "She was in the last column."  /  "He was in row 2."
+- Relative to a person:"He was directly north of Mara."  /  "She sat two columns east of Dean."
+- Relative direction:  "He was somewhere south of the victim."
+
+The victim's card is always, automatically: "They were alone with the murderer."
+(or "He/She was…" if you set the victim's gender in the Studio — but you do not
+supply the victim clue in JSON).
+
+General clues are optional scene-wide statements, e.g.:
+- "The cash register was untouched — robbery wasn't the motive."
+- "Nobody stood in the doorway."
+
+GENERATION RECIPE
+1. Pick a theme, a grid size N×N, and N people (N-1 suspects + 1 victim).
+2. Lay out regions covering the grid; give the murder its own region containing
+   the victim and exactly one suspect.
+3. Choose people positions as a permutation (one per row, one per column).
+4. Place a few objects to give clues something to reference; mark which are
+   occupiable.
+5. Write one TRUE, distinguishing clue per suspect. Add 0–3 general clues.
+6. Double-check every constraint in section 3.
+
+================================================================================
+5. COMPLETE EXAMPLE — "Netflix and Kill" (6×6, very easy)
+================================================================================
+
+Murderer (by the rules, not stored as a clue): Barbara — she is the only suspect
+in the Bedroom, where the victim Vaughn lies.
+
+{
+  "title": "Netflix and Kill",
+  "grid": { "rows": 6, "cols": 6 },
+  "regions": [
+    {
+      "name": "Living Room",
+      "color": "#d6f0ea",
+      "cells": [[1,1],[1,2],[1,3],[1,4],[2,1],[2,2],[2,3],[2,4],
+                [3,1],[3,2],[3,3],[3,4],[4,1],[4,2],[4,3],[4,4]]
+    },
+    {
+      "name": "Kitchen",
+      "color": "#d8edcb",
+      "cells": [[1,5],[1,6],[2,5],[2,6],[3,5],[3,6],
+                [4,5],[4,6],[5,5],[5,6],[6,5],[6,6]]
+    },
+    {
+      "name": "Bedroom",
+      "color": "#e6dcf0",
+      "cells": [[5,1],[5,2],[5,3],[5,4],[6,1],[6,2],[6,3],[6,4]]
+    }
+  ],
+  "objects": [
+    { "type": "tv",    "emoji": "📺", "occupiable": false, "row": 1, "col": 1 },
+    { "type": "sofa",  "emoji": "🛋️", "occupiable": true,  "row": 2, "col": 2 },
+    { "type": "shelf", "emoji": "📚", "occupiable": false, "row": 3, "col": 3 },
+    { "type": "chair", "emoji": "🪑", "occupiable": true,  "row": 4, "col": 2 },
+    { "type": "bed",   "emoji": "🛏️", "occupiable": true,  "row": 5, "col": 1 },
+    { "type": "table", "emoji": "🍽️", "occupiable": true,  "row": 2, "col": 5 }
+  ],
+  "people": [
+    { "name": "Austin",    "row": 3, "col": 4, "clue": "He was beside the shelf." },
+    { "name": "Barbara",   "row": 5, "col": 1, "clue": "She was on the bed." },
+    { "name": "Charlotte", "row": 4, "col": 2, "clue": "She was the only person sitting in a chair." },
+    { "name": "Dean",      "row": 2, "col": 5, "clue": "He was in the Kitchen." },
+    { "name": "Enid",      "row": 1, "col": 6, "clue": "She was in the last column." },
+    { "name": "Vaughn",    "row": 6, "col": 3, "victim": true }
+  ],
+  "generalClues": [
+    "The TV was still playing when the body was found.",
+    "The cash register was untouched — robbery wasn't the motive."
+  ]
+}
+
+Why this is valid:
+- 6 people on a 6×6 grid; rows used {3,5,4,2,1,6} all distinct; columns used
+  {4,1,2,5,6,3} all distinct → row/column rule holds.
+- Victim Vaughn is at (6,3) in the Bedroom. Suspects in the Bedroom: only Barbara
+  (5,1). Charlotte (4,2) is in the Living Room. → exactly one suspect with the
+  victim → Barbara is the murderer.
+- Each suspect's clue is true: Austin (3,4) is orthogonally adjacent to the shelf
+  at (3,3) in the same region; Barbara (5,1) is on the bed at (5,1); Charlotte
+  (4,2) is on the only chair; Dean (2,5) is in the Kitchen; Enid (1,6) is in the
+  last column (6).
+
+To use a generated case: open Murdoku Studio → Case actions → Import → "Load from
+.json" (or paste the JSON) → Import.

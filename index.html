@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Murdoku Studio — Puzzle Maker</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔪</text></svg>" />
+</head>
+<body>
+  <!-- ================= Top bar ================= -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">Mur<span class="dot">d</span>oku <span style="font-size:20px">Studio</span></span>
+    </div>
+    <span class="spacer"></span>
+    <div class="btn-row">
+      <button class="btn sm" id="btn-new"><svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 3.5v9M3.5 8h9"/></svg> New case</button>
+      <button class="btn sm" id="btn-sample"><svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M8 2.3l1.3 3.4 3.4 1.3-3.4 1.3L8 11.7 6.7 8.3 3.3 7l3.4-1.3z"/></svg> Load sample</button>
+      <button class="btn sm" id="btn-import"><svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.5v7M5 6.5 8 9.5l3-3M3 12.5h10"/></svg> Import</button>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <!-- ================= Stage: crime scene grid ================= -->
+    <section class="stage">
+      <div class="card">
+        <div class="grid-meta">
+          <input class="scene-title" id="scene-title" value="Untitled Case" aria-label="Scene title" />
+        </div>
+
+        <div class="toolbar" id="toolbar">
+          <button class="tool" data-mode="region" aria-pressed="true">🎨 Paint regions</button>
+          <button class="tool" data-mode="object">🪑 Place objects</button>
+          <button class="tool" data-mode="character">🧍 Place people</button>
+          <button class="tool" data-mode="erase">🗑️ Erase</button>
+        </div>
+
+        <div class="note no-print" id="active-tool-hint" style="margin-bottom:10px"></div>
+
+        <div class="grid-wrap">
+          <div class="scene-grid" id="grid"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= Sidebar (accordion) ================= -->
+    <aside class="sidebar">
+
+      <!-- Verdict / validation -->
+      <div class="card panel open" data-panel>
+        <button class="panel-head" type="button"><span class="ph-title">🔎 Case status</span><span class="chev">▾</span></button>
+        <div class="panel-body">
+          <div id="verdict" class="verdict none">Set up your case</div>
+          <div id="checks"></div>
+        </div>
+      </div>
+
+      <!-- Case actions -->
+      <div class="card panel" data-panel>
+        <button class="panel-head" type="button"><span class="ph-title">📦 Case actions</span><span class="chev">▾</span></button>
+        <div class="panel-body">
+          <div class="btn-row" style="flex-direction:column">
+            <button class="btn block" id="btn-export">⬆ Export</button>
+            <button class="btn block" id="btn-export-png">🖼 Export as PNG</button>
+            <button class="btn block primary" id="btn-print">🖨 Print sheet</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Grid setup -->
+      <div class="card panel" data-panel>
+        <button class="panel-head" type="button"><span class="ph-title">📐 Grid</span><span class="chev">▾</span></button>
+        <div class="panel-body">
+          <div class="inline">
+            <div>
+              <label class="field">Rows</label>
+              <div class="stepper">
+                <button class="btn step" data-dim="rows" data-d="-1">−</button>
+                <input type="number" id="rows" min="3" max="9" value="6" />
+                <button class="btn step" data-dim="rows" data-d="1">＋</button>
+              </div>
+            </div>
+            <div>
+              <label class="field">Columns</label>
+              <div class="stepper">
+                <button class="btn step" data-dim="cols" data-d="-1">−</button>
+                <input type="number" id="cols" min="3" max="9" value="6" />
+                <button class="btn step" data-dim="cols" data-d="1">＋</button>
+              </div>
+            </div>
+          </div>
+          <p class="hint" style="margin-top:10px;margin-bottom:0">One person per row &amp; column — like Sudoku. Resizing keeps what fits.</p>
+        </div>
+      </div>
+
+      <!-- Regions -->
+      <div class="card panel" data-panel>
+        <button class="panel-head" type="button"><span class="ph-title">🗺️ Regions</span><span class="chev">▾</span></button>
+        <div class="panel-body">
+          <p class="hint">Colored areas that group cells. The murder happens inside one region.</p>
+          <div id="region-list"></div>
+          <div class="inline" style="margin-top:8px">
+            <input type="color" id="new-region-color" class="swatch-input" title="Region color" />
+            <div><input type="text" id="new-region" placeholder="e.g. Living Room" /></div>
+            <button class="btn" id="add-region">Add</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Objects -->
+      <div class="card panel" data-panel>
+        <button class="panel-head" type="button"><span class="ph-title">🪑 Objects</span><span class="chev">▾</span></button>
+        <div class="panel-body">
+          <p class="hint">Select an object, switch to <b>Place objects</b>, then click cells. Clues can reference them.</p>
+
+          <div class="sub-label">🚶 People can stand here</div>
+          <div id="object-list-occ"></div>
+          <div class="inline" style="margin-top:8px">
+            <div style="flex:0 0 auto;position:relative">
+              <button class="emoji-toggle" id="emoji-toggle-occ" type="button" title="Pick an emoji">🏠</button>
+              <input type="text" id="new-object-emoji-occ" value="🏠" hidden />
+              <div class="emoji-pop" id="emoji-pop-occ" hidden><emoji-picker id="emoji-el-occ"></emoji-picker></div>
+            </div>
+            <div><input type="text" id="new-object-occ" placeholder="e.g. Chair" /></div>
+            <button class="btn" id="add-object-occ">Add</button>
+          </div>
+
+          <div class="sub-label" style="margin-top:14px">🚷 Scenery — cannot be occupied</div>
+          <div id="object-list-non"></div>
+          <div class="inline" style="margin-top:8px">
+            <div style="flex:0 0 auto;position:relative">
+              <button class="emoji-toggle" id="emoji-toggle-non" type="button" title="Pick an emoji">🏠</button>
+              <input type="text" id="new-object-emoji-non" value="🏠" hidden />
+              <div class="emoji-pop" id="emoji-pop-non" hidden><emoji-picker id="emoji-el-non"></emoji-picker></div>
+            </div>
+            <div><input type="text" id="new-object-non" placeholder="e.g. Shelf" /></div>
+            <button class="btn" id="add-object-non">Add</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- People -->
+      <div class="card panel" data-panel>
+        <button class="panel-head" type="button"><span class="ph-title">🧑‍🤝‍🧑 People</span><span class="chev">▾</span></button>
+        <div class="panel-body">
+          <p class="hint">Add suspects and mark one victim. Select someone, switch to <b>Place people</b>, click a cell.</p>
+          <div id="people-list"></div>
+          <div class="inline" style="margin-top:8px">
+            <input type="color" id="new-person-color" class="swatch-input round" title="Token color" />
+            <div><input type="text" id="new-person" placeholder="e.g. John" /></div>
+            <button class="btn" id="add-person">Add</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- General clues -->
+      <div class="card panel" data-panel>
+        <button class="panel-head" type="button"><span class="ph-title">📣 General clues</span><span class="chev">▾</span></button>
+        <div class="panel-body">
+          <p class="hint">Scene-wide clues that aren't tied to a single suspect.</p>
+          <div id="general-clue-list"></div>
+          <div class="inline" style="margin-top:8px">
+            <div><input type="text" id="new-general" placeholder="e.g. Nobody stood in the doorway." /></div>
+            <button class="btn" id="add-general">Add</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Suspect clues -->
+      <div class="card panel" data-panel>
+        <button class="panel-head" type="button"><span class="ph-title">🗂️ Suspect clues</span><span class="chev">▾</span></button>
+        <div class="panel-body">
+          <p class="hint">Write one clue card per suspect. The victim's card is generated for you. Free text.</p>
+          <div id="clue-list"></div>
+        </div>
+      </div>
+
+    </aside>
+  </main>
+
+  <!-- ================= Modal ================= -->
+  <div class="modal-backdrop" id="modal">
+    <div class="modal">
+      <div style="display:flex;align-items:center;gap:10px">
+        <h2 id="modal-title" style="flex:1">Export</h2>
+        <button class="btn ghost" id="modal-close">✕</button>
+      </div>
+      <div id="modal-body"></div>
+    </div>
+  </div>
+
+  <div class="flash" id="flash"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
