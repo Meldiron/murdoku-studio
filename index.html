@@ -15,6 +15,7 @@
     </div>
     <span class="spacer"></span>
     <div class="btn-row">
+      <button class="btn sm primary" id="btn-generate"><svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" stroke-linecap="round"><path d="M8 2.3l1.3 3.4 3.4 1.3-3.4 1.3L8 11.7 6.7 8.3 3.3 7l3.4-1.3z"/><path d="M12.5 10.5l.5 1.4 1.4.5-1.4.5-.5 1.4-.5-1.4-1.4-.5 1.4-.5z"/></svg> Generate</button>
       <button class="btn sm" id="btn-new"><svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 3.5v9M3.5 8h9"/></svg> New case</button>
       <button class="btn sm" id="btn-sample"><svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M8 2.3l1.3 3.4 3.4 1.3-3.4 1.3L8 11.7 6.7 8.3 3.3 7l3.4-1.3z"/></svg> Load sample</button>
       <button class="btn sm" id="btn-import"><svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.5v7M5 6.5 8 9.5l3-3M3 12.5h10"/></svg> Import</button>
@@ -53,6 +54,11 @@
         <div class="panel-body">
           <div id="verdict" class="verdict none">Set up your case</div>
           <div id="checks"></div>
+          <div class="btn-row" style="margin-top:12px">
+            <button class="btn block" id="btn-validate">✅ Validate</button>
+            <button class="btn block" id="btn-solve">🧠 Solve</button>
+          </div>
+          <p class="hint" style="margin:8px 0 0">Validate re-checks every rule; Solve proves a single, no-guess solution with the victim last. Both need a generated puzzle.</p>
         </div>
       </div>
 
@@ -192,6 +198,7 @@
 
   <div class="flash" id="flash"></div>
 
+  <script src="generator/engine.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

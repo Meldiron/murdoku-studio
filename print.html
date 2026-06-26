@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Murdoku — play sheet</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔪</text></svg>" />
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@600;800;900&family=Patrick+Hand&display=swap');
+    body{font-family:'Nunito',sans-serif;color:#232229;margin:0;background:#f4f2ef}
+    /* browser view: centered, fixed-width "page". @media print resets this. */
+    #sheet{max-width:820px;margin:0 auto;padding:32px 40px;background:#fff;min-height:100vh;box-sizing:border-box}
+    h1{font-family:'Patrick Hand',cursive;font-size:42px;margin:0}
+    .grid{display:grid;gap:0;border:4px solid #232229;width:max-content;margin:24px 0;border-radius:8px;overflow:hidden}
+    .gc{position:relative;width:64px;height:64px;border:1px solid rgba(35,34,41,.25);display:flex;align-items:center;justify-content:center;line-height:1;cursor:pointer;user-select:none;-webkit-user-select:none}
+    .gc .gobj{font-size:24px}
+    /* interaction: left-click = eliminate (darken + ✕); right-click = place a person */
+    .gc.xed{filter:brightness(.8) saturate(.7)}
+    .gc .xmark{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:40px;font-weight:900;color:#232229;opacity:.7;pointer-events:none;z-index:3}
+    .gc .ptoken{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:46px;height:46px;border-radius:50%;border:3px solid #232229;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:16px;background:#fff;box-shadow:2px 2px 0 rgba(35,34,41,.25);z-index:2}
+    .gc .ptoken.victim{background:repeating-linear-gradient(45deg,#fcd4d8,#fcd4d8 6px,#fff 6px,#fff 12px)}
+    /* small "note" markers (pencil marks) stacked in the upper-right corner */
+    .gc .pnote-wrap{position:absolute;top:2px;right:2px;display:flex;flex-wrap:wrap;gap:1px;max-width:38px;justify-content:flex-end;z-index:4}
+    .gc .pnote{width:15px;height:15px;border-radius:50%;border:1.5px solid #232229;display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:900;background:#fff;line-height:1;overflow:hidden}
+    .gc .pnote.victim{background:repeating-linear-gradient(45deg,#fcd4d8,#fcd4d8 3px,#fff 3px,#fff 6px)}
+    .person-menu{position:absolute;z-index:50;background:#fff;border:2px solid #232229;border-radius:8px;box-shadow:3px 3px 0 rgba(35,34,41,.25);padding:4px;min-width:180px;max-height:300px;overflow:auto}
+    .person-menu .pm-head{font-weight:900;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#66616b;padding:4px 8px}
+    .person-menu button{display:flex;align-items:center;gap:8px;width:100%;border:none;background:none;padding:6px 8px;border-radius:6px;cursor:pointer;font-weight:800;font-size:13px;text-align:left;color:#232229}
+    .person-menu button:hover{background:#f0ece3}
+    .person-menu .dot{width:20px;height:20px;border-radius:50%;border:2px solid #232229;flex:0 0 auto;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900}
+    /* one row per person: click = place token, ✎ = toggle a corner note */
+    .person-menu .pm-person{display:flex;align-items:center;gap:8px;padding:5px 6px 5px 8px;border-radius:6px;cursor:pointer;font-weight:800;font-size:13px;color:#232229}
+    .person-menu .pm-person:hover{background:#f0ece3}
+    .person-menu .pm-name{flex:1;white-space:nowrap}
+    .person-menu .pm-note-btn{flex:0 0 auto;width:26px;height:22px;border:1.5px solid #232229;border-radius:6px;background:#fff;cursor:pointer;font-size:12px;line-height:1;display:flex;align-items:center;justify-content:center;padding:0}
+    .person-menu .pm-note-btn:hover{background:#efc85a}
+    .person-menu .pm-note-btn.on{background:#bfe3d4}
+    h2{font-family:'Patrick Hand',cursive;font-size:28px;margin:24px 0 10px}
+    .lg-label{font-weight:800;font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:#66616b;margin:10px 0 5px}
+    .legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin-bottom:6px}
+    .leg{display:flex;align-items:center;gap:6px;font-weight:800;border:2px solid #232229;border-radius:999px;padding:3px 12px;background:#fff;box-shadow:3px 3px 0 rgba(35,34,41,.18)}
+    .leg-emoji{font-size:18px;line-height:1}
+    .leg-swatch{width:16px;height:16px;border:2px solid #232229;border-radius:4px}
+    .ps-card{border:2px solid #232229;border-radius:8px;padding:10px 14px;margin-bottom:10px;background:#fff8df;box-shadow:3px 3px 0 rgba(35,34,41,.22)}
+    .ps-cols{column-count:2;column-gap:14px}
+    .ps-cols .ps-card{break-inside:avoid;-webkit-column-break-inside:avoid}
+    .ps-victim{background:#fcd4d8}.ps-gen{background:#d6f0ea;font-style:italic;font-weight:700}
+    .ps-name{font-weight:900;margin-bottom:3px}
+    .ps-clue{font-style:italic;font-weight:700}
+    .toolbar-print{display:flex;gap:10px;align-items:center;margin-top:18px;flex-wrap:wrap}
+    .btn-print{font-family:Nunito,sans-serif;font-weight:800;padding:8px 16px;border:2px solid #232229;border-radius:8px;background:#efc85a;cursor:pointer;box-shadow:3px 3px 0 rgba(35,34,41,.25)}
+    .btn-print.ghost{background:#fff}
+    .tip{color:#66616b;font-weight:700;margin-top:14px}
+    .empty-note{color:#66616b;font-weight:700}
+    @media print{
+      body{background:#fff}
+      #sheet{max-width:none;margin:0;padding:0;min-height:0;background:#fff}
+      .noprint{display:none}
+      .page-break{break-before:page;page-break-before:always}
+    }
+  </style>
+</head>
+<body>
+  <div id="sheet"><p class="empty-note">Loading play sheet…</p></div>
+  <script src="print.js"></script>
+</body>
+</html>

@@ -582,6 +582,175 @@ function buildFromAuthoring(a) {
   return c;
 }
 
+/* ===================== GENERATE / SOLVE / VALIDATE ===================== */
+/* These wire the standalone Murdoku engine (engine.js) into the Studio. The
+   engine generates a puzzle that is valid, uniquely + logically solvable (no
+   guessing) with the victim solved LAST, then Validate / Solve re-prove it. */
+
+// Build the engine's 1-based `model` from the current Studio state, attaching
+// the structured clues captured at generation time (S._murdoku) by name.
+function engineModelFromState() {
+  const m = S._murdoku || null;
+  const regById = {};
+  S.regions.forEach((g) => { regById[g.id] = { name: g.name, color: g.color, cells: [] }; });
+  for (const [k, id] of Object.entries(S.cellRegion)) {
+    const [r, c] = k.split(',').map(Number);
+    if (regById[id]) regById[id].cells.push([r + 1, c + 1]);
+  }
+  const objects = S.objects.map((o) => ({ type: o.type, emoji: objTypeMeta(o.type).emoji, occupiable: !!objTypeMeta(o.type).occupiable, row: o.r + 1, col: o.c + 1 }));
+  const susByName = {};
+  if (m) (m.suspects || []).forEach((s) => { susByName[s.name] = s; });
+  const proseByName = {};
+  let missingStructured = false;
+  const people = S.people.filter(placed).map((p) => {
+    if (!p.isVictim) proseByName[p.name] = p.clue || '';
+    let clue = null;
+    if (!p.isVictim) {
+      if (susByName[p.name]) clue = susByName[p.name].clue;
+      else { missingStructured = true; clue = undefined; }
+    }
+    return { name: p.name, gender: p.gender || 'they', row: p.r + 1, col: p.c + 1, isVictim: !!p.isVictim, clue };
+  });
+  const v = victim();
+  return {
+    model: {
+      grid: { rows: S.rows, cols: S.cols },
+      regions: Object.values(regById),
+      objects, people,
+      victim: v ? v.name : null,
+      murderer: m ? m.murderer : null,
+      murderRoom: m ? m.murderRoom : null,
+      _proseByName: proseByName,
+    },
+    hasStructured: !!m,
+    missingStructured,
+  };
+}
+
+function engineReady() {
+  if (typeof window.MurdokuEngine === 'undefined') { flash('Engine not loaded.'); return false; }
+  return true;
+}
+
+// Pre-flight common to Solve & Validate: we need the structured puzzle.
+function needGenerated() {
+  const { hasStructured, missingStructured } = engineModelFromState();
+  if (!hasStructured) {
+    openModal('Generate first', `<p class="note" style="margin-top:0">Solve &amp; Validate read the puzzle's structured clues, which only a <b>generated</b> case carries.</p>
+      <p class="note">Click <b>✨ Generate</b> in the top bar to create one, then try again.</p>`);
+    return false;
+  }
+  if (missingStructured) flash('Some suspects were added by hand — they have no machine-readable clue and will fail checks.');
+  return true;
+}
+
+function openGenerateModal() {
+  const cur = Math.max(3, Math.min(9, S.rows || 6));
+  openModal('Generate a puzzle', `
+    <p class="note" style="margin-top:0">Pick a grid size. The generator builds a case with a <b>single, no-guess solution</b> where the victim is deduced <b>last</b>, then validates &amp; solves it to be sure (regenerating on any failure).</p>
+    <label class="field">Grid size — ${'N'}×N</label>
+    <div class="stepper" style="margin:6px 0 4px">
+      <button class="btn step" id="gen-minus">−</button>
+      <input type="number" id="gen-size" min="3" max="9" value="${cur}" />
+      <button class="btn step" id="gen-plus">＋</button>
+    </div>
+    <p class="hint" style="margin:6px 0 14px">3–9 each side. One person per row &amp; column. Larger grids make richer clue chains.</p>
+    <div class="btn-row">
+      <button class="btn primary" id="gen-go">✨ Generate puzzle</button>
+    </div>
+    <div id="gen-status" class="note" style="margin-top:12px"></div>`);
+  const sizeEl = $('gen-size');
+  const clamp = () => { sizeEl.value = Math.max(3, Math.min(9, +sizeEl.value || 6)); };
+  $('gen-minus').onclick = () => { sizeEl.value = Math.max(3, (+sizeEl.value || 6) - 1); };
+  $('gen-plus').onclick = () => { sizeEl.value = Math.min(9, (+sizeEl.value || 6) + 1); };
+  sizeEl.onchange = clamp;
+  $('gen-go').onclick = () => { clamp(); runGenerate(+sizeEl.value); };
+}
+
+function runGenerate(N) {
+  if (!engineReady()) return;
+  const status = $('gen-status');
+  const go = $('gen-go');
+  if (go) go.disabled = true;
+  if (status) status.innerHTML = `Generating a ${N}×${N} puzzle…`;
+  // defer so the "Generating…" paint lands before the (fast) synchronous work
+  setTimeout(() => {
+    let r;
+    try { r = window.MurdokuEngine.generate(N, { maxAttempts: 1000 }); }
+    catch (e) { if (status) status.innerHTML = `<span style="color:#b3261e">Error: ${escapeHtml(e.message)}</span>`; if (go) go.disabled = false; return; }
+    if (!r || !r.ok) {
+      if (status) status.innerHTML = `<span style="color:#b3261e">Couldn't build a valid puzzle after ${r ? r.attempts : 0} attempts. Try again.</span>`;
+      if (go) go.disabled = false;
+      return;
+    }
+    const c = buildFromAuthoring(r.authoring);
+    c._murdoku = r.authoring._murdoku;   // keep structured clues for Solve/Validate
+    loadCase(c);
+    save();
+    closeModal();
+    flash(`Generated a ${N}×${N} puzzle · ${r.solve.murderer} did it.`);
+  }, 30);
+}
+
+// shared renderer for a check list (Validate) — reuses the .check styles
+function checkListHTML(checks) {
+  return checks.map((c) => {
+    const cls = c.ok ? 'ok' : 'err';
+    const badge = c.ok ? '✓' : '✗';
+    return `<div class="check ${cls}"><span class="badge">${badge}</span><div>${escapeHtml(c.label)}${c.detail ? `<span class="sub">${escapeHtml(c.detail)}</span>` : ''}</div></div>`;
+  }).join('');
+}
+
+function runValidate() {
+  if (!engineReady() || !needGenerated()) return;
+  const { model } = engineModelFromState();
+  let v;
+  try { v = window.MurdokuEngine.validateModel(model); }
+  catch (e) { openModal('Validation error', `<p class="note">${escapeHtml(e.message)}</p>`); return; }
+  const head = v.pass
+    ? `<div class="verdict solved" style="margin:0 0 12px">All ${v.checks.length} checks passed ✓</div>`
+    : `<div class="verdict none" style="margin:0 0 12px">${v.checks.filter((c) => !c.ok).length} check(s) failed ✗</div>`;
+  openModal('Validate case', head + checkListHTML(v.checks));
+}
+
+function solveGridHTML(N, assign, murderer, victimName) {
+  const at = {};
+  for (const [name, [r, c]] of Object.entries(assign)) at[key(r, c)] = name;
+  let h = `<div class="grid" style="display:grid;grid-template-columns:repeat(${N},minmax(34px,1fr));gap:0;border:3px solid #232229;border-radius:8px;overflow:hidden;margin:10px 0;max-width:420px">`;
+  for (let r = 1; r <= N; r++) for (let c = 1; c <= N; c++) {
+    const who = at[key(r, c)];
+    const isV = who === victimName, isM = who === murderer;
+    const bg = isV ? '#fcd4d8' : isM ? '#fff3c4' : '#fff';
+    h += `<div style="aspect-ratio:1;display:flex;align-items:center;justify-content:center;border:1px solid rgba(35,34,41,.18);background:${bg};font-weight:800;font-size:11px;text-align:center;line-height:1.05;padding:2px">${who ? escapeHtml(who.slice(0, 6)) + (isV ? ' 💀' : '') : ''}</div>`;
+  }
+  return h + '</div>';
+}
+
+function runSolve() {
+  if (!engineReady() || !needGenerated()) return;
+  const { model } = engineModelFromState();
+  let s;
+  try { s = window.MurdokuEngine.solveModel(model); }
+  catch (e) { openModal('Solver error', `<p class="note">${escapeHtml(e.message)}</p>`); return; }
+
+  const guarantees = [
+    { ok: s.logicOK, label: 'Logic-solvable with NO guessing' },
+    { ok: s.unique, label: `Exactly ONE solution (search found ${s.nSol >= 3 ? '3+' : s.nSol})` },
+    { ok: !!s.victimLast, label: 'Victim is determined LAST' },
+    { ok: !!s.matches, label: 'Logic solution matches the board' },
+  ];
+  const head = s.pass
+    ? `<div class="verdict solved" style="margin:0 0 12px">Valid logic puzzle ✓ · ${escapeHtml(s.murderer || '?')} did it</div>`
+    : `<div class="verdict none" style="margin:0 0 12px">Not a clean logic puzzle ✗</div>`;
+  const order = s.order && s.order.length
+    ? `<p class="note" style="margin:0 0 4px"><b>Deduction order</b> (victim in brackets, last):</p>
+       <p class="note" style="margin:0 0 10px">${s.order.map((n) => n === s.victim ? `[<b>${escapeHtml(n)}</b>]` : escapeHtml(n)).join(' → ')}</p>`
+    : (s.reason ? `<p class="note" style="margin:0 0 10px;color:#b3261e">Stuck: ${escapeHtml(s.reason)}</p>` : '');
+  const grid = (s.logicOK && s.assign) ? solveGridHTML(model.grid.rows, s.assign, s.murderer, s.victim) : '';
+  const accuse = s.murderer ? `<p class="note" style="margin:8px 0 0">Victim <b>${escapeHtml(s.victim)}</b> was alone with <b>${escapeHtml(s.murderer)}</b> in the ${escapeHtml(s.sceneRegion || '?')}.</p>` : '';
+  openModal('Solve case', head + checkListHTML(guarantees) + '<div style="height:8px"></div>' + order + grid + accuse);
+}
+
 /* ============================ EXPORT PNG =============================== */
 async function exportPNG() {
   const scale = 2, cell = 84, head = 28, pad = 10, border = 4;
@@ -632,72 +801,46 @@ async function exportPNG() {
 }
 
 /* ============================ PRINT SHEET =============================== */
-function printSheet() {
-  const v = victim();
-  const cards = suspects().map((p) => `
-    <div class="ps-card"><div class="ps-name">${escapeHtml(p.name)}</div>
-    <div class="ps-clue">${p.clue && p.clue.trim() ? escapeHtml(p.clue) : '<i>no clue</i>'}</div></div>`).join('');
-  const vcard = v ? `<div class="ps-card ps-victim"><div class="ps-name">${escapeHtml(v.name)} · victim</div>
-    <div class="ps-clue">${escapeHtml(defaultVictimClue(v))}</div></div>` : '';
-  const clueCols = `<div class="ps-cols">${cards}${vcard}</div>`;
-  const gen = S.generalClues.filter((x) => x.trim());
-  const genHtml = gen.length ? `<h2>General clues</h2><div class="ps-cols">${gen.map((g) => `<div class="ps-card ps-gen">${escapeHtml(g)}</div>`).join('')}</div>` : '';
-  const usedTypes = [...new Set(S.objects.map((o) => o.type))].map(objTypeMeta);
-  const legItems = (arr) => `<div class="legend">${arr.map((m) =>
-    `<div class="leg"><span class="leg-emoji">${m.emoji}</span> ${escapeHtml(m.type)}</div>`).join('')}</div>`;
-  const occ = usedTypes.filter((m) => m.occupiable), non = usedTypes.filter((m) => !m.occupiable);
-  const objLegend = usedTypes.length ? `<h2>Objects</h2>` +
-    (occ.length ? `<div class="lg-label">People can stand here</div>${legItems(occ)}` : '') +
-    (non.length ? `<div class="lg-label">Scenery — cannot be occupied</div>${legItems(non)}` : '') : '';
-  const regionLegend = S.regions.length ? `<h2>Regions</h2><div class="legend">${S.regions.map((g) =>
-    `<div class="leg"><span class="leg-swatch" style="background:${g.color}"></span> ${escapeHtml(g.name)}</div>`).join('')}</div>` : '';
-  const w = window.open('', '_blank');
-  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(S.title)}</title>
-  <style>
-    @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@600;800;900&family=Patrick+Hand&display=swap');
-    body{font-family:'Nunito',sans-serif;color:#232229;margin:40px;background:#fff}
-    h1{font-family:'Patrick Hand',cursive;font-size:42px;margin:0}
-    .grid{display:grid;gap:0;border:4px solid #232229;width:max-content;margin:24px 0;border-radius:8px;overflow:hidden}
-    .gc{width:64px;height:64px;border:1px solid rgba(35,34,41,.25);display:flex;align-items:center;justify-content:center;line-height:1}
-    .gc .gobj{font-size:24px}
-    h2{font-family:'Patrick Hand',cursive;font-size:28px;margin:24px 0 10px}
-    .lg-label{font-weight:800;font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:#66616b;margin:10px 0 5px}
-    .legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin-bottom:6px}
-    .leg{display:flex;align-items:center;gap:6px;font-weight:800;border:2px solid #232229;border-radius:999px;padding:3px 12px;background:#fff;box-shadow:3px 3px 0 rgba(35,34,41,.18)}
-    .leg-emoji{font-size:18px;line-height:1}
-    .leg-swatch{width:16px;height:16px;border:2px solid #232229;border-radius:4px}
-    .ps-card{border:2px solid #232229;border-radius:8px;padding:10px 14px;margin-bottom:10px;background:#fff8df;box-shadow:3px 3px 0 rgba(35,34,41,.22)}
-    .ps-cols{column-count:2;column-gap:14px}
-    .ps-cols .ps-card{break-inside:avoid;-webkit-column-break-inside:avoid}
-    .ps-victim{background:#fcd4d8}.ps-gen{background:#d6f0ea;font-style:italic;font-weight:700}
-    .ps-name{font-weight:900;margin-bottom:3px}
-    .ps-clue{font-style:italic;font-weight:700}
-    @media print{.noprint{display:none}.page-break{break-before:page;page-break-before:always}}
-  </style></head><body>
-  <h1>${escapeHtml(S.title)}</h1>
-  ${printGridHTML()}
-  ${regionLegend}
-  ${objLegend}
-  <div class="page-break">
-  ${genHtml}
-  ${(suspects().length || v) ? '<h2>Clue cards</h2>' + clueCols : ''}
-  </div>
-  <p class="noprint"><button onclick="window.print()" style="font-family:Nunito;font-weight:800;padding:8px 16px;border:2px solid #232229;border-radius:8px;background:#efc85a;cursor:pointer;box-shadow:3px 3px 0 rgba(35,34,41,.25)">🖨 Print</button></p>
-  </body></html>`);
-  w.document.close();
-}
-function printGridHTML() {
-  let h = `<div class="grid" style="grid-template-columns:repeat(${S.cols},64px)">`;
-  for (let r = 0; r < S.rows; r++) {
-    for (let c = 0; c < S.cols; c++) {
-      const reg = regionAt(r, c); const col = reg ? regionById(reg).color : '#fff';
-      const objs = objectsAt(r, c);
-      h += `<div class="gc" style="background:${col}">`;
-      if (objs.length) h += `<span class="gobj">${objTypeMeta(objs[0]).emoji}</span>`;
-      h += `</div>`;
-    }
+/* Build a self-contained "print data" object (everything the standalone play
+   sheet needs) and open print.html with it encoded in the URL, so the sheet has
+   a real, refreshable address instead of about:blank. */
+function buildPrintData() {
+  const cellColor = (r, c) => { const id = regionAt(r, c); return id && regionById(id) ? regionById(id).color : '#fff'; };
+  const grid = [];
+  for (let r = 0; r < S.rows; r++) for (let c = 0; c < S.cols; c++) {
+    const objs = objectsAt(r, c);
+    grid.push({ r, c, color: cellColor(r, c), emoji: objs.length ? objTypeMeta(objs[0]).emoji : '' });
   }
-  return h + '</div>';
+  const usedTypes = [...new Set(S.objects.map((o) => o.type))].map(objTypeMeta);
+  const v = victim();
+  return {
+    title: S.title, rows: S.rows, cols: S.cols, grid,
+    regions: S.regions.map((g) => ({ name: g.name, color: g.color })),
+    occ: usedTypes.filter((m) => m.occupiable).map((m) => ({ type: m.type, emoji: m.emoji })),
+    non: usedTypes.filter((m) => !m.occupiable).map((m) => ({ type: m.type, emoji: m.emoji })),
+    general: S.generalClues.filter((x) => x.trim()),
+    cards: [
+      ...suspects().map((p) => ({ name: p.name, clue: p.clue && p.clue.trim() ? p.clue : '', victim: false })),
+      ...(v ? [{ name: v.name, clue: defaultVictimClue(v), victim: true }] : []),
+    ],
+    people: S.people.map((p) => ({ name: p.name, color: p.color || '#ffffff', initials: initials(p.name), victim: !!p.isVictim })),
+  };
+}
+
+// UTF-8 + base64url (handles emoji); mirrored by fromB64() in print.js.
+function toB64Url(str) {
+  const bytes = new TextEncoder().encode(str);
+  let bin = ''; const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function printSheet() {
+  let enc;
+  try { enc = toB64Url(JSON.stringify(buildPrintData())); }
+  catch (e) { flash('Could not prepare the play sheet.'); return; }
+  const w = window.open('print.html?d=' + enc, '_blank');
+  if (!w) flash('Allow pop-ups to open the play sheet.');
 }
 
 /* ============================ EMOJI PICKER ============================= */
@@ -810,6 +953,9 @@ function init() {
 
   document.querySelectorAll('.tool').forEach((t) => t.onclick = () => { mode = t.dataset.mode; render(); });
 
+  $('btn-generate').onclick = openGenerateModal;
+  $('btn-validate').onclick = runValidate;
+  $('btn-solve').onclick = runSolve;
   $('btn-new').onclick = () => { loadCase(blankCase()); save(); flash('New blank case.'); };
   $('btn-sample').onclick = () => { loadCase(sampleCase()); save(); flash('Loaded the sample case.'); };
   $('btn-export').onclick = exportJSON;
